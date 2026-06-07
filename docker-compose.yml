@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sso
+      # Kein schwaches Default mehr: muss in .env gesetzt sein (sonst bricht
+      # `docker compose up` mit klarer Meldung ab) — keine vorhersehbaren Creds.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD muss in .env gesetzt sein}
+      POSTGRES_DB: sso
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    # Bewusst KEIN Host-Port: jeder Stack hat seine EIGENE DB, nur compose-intern
+    # erreichbar (die App nutzt db:5432 über das Compose-Netz). Für lokales
+    # `npm run dev` gegen den Container einkommentieren:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sso -d sso"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    # Vorgebautes Image aus der GitHub Container Registry (ghcr.io, per CI gepusht).
+    # Tag optional über LIMEN_TAG pinnen (z. B. 1.0.0 oder eine Commit-SHA), sonst :latest.
+    image: ghcr.io/erikenglerdev/limen:${LIMEN_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    # Erkennt einen hängenden Container (läuft, aber kaputt) — node bringt fetch
+    # mit, /api/health antwortet ohne DB-Zugriff mit 200.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      TZ: Europe/Berlin
+      # DB-Host im Compose-Netz überschreibt den .env-Wert (dort localhost für npm run dev).
+      DATABASE_URL: postgres://sso:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD muss in .env gesetzt sein}@db:5432/sso
+      UPLOAD_DIR: /app/uploads
+      AUTH_TRUST_HOST: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+    ports:
+      # Nur lokal exponiert — nginx (Host) terminiert SSL und proxyt hierher.
+      # SSO läuft auf Host-Port 3000 (Container bleibt 3000).
+      - "127.0.0.1:3000:3000"

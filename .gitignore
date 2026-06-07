@@ -1,0 +1,39 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# editor / IDE
+/.idea/
+/.vscode/
+
+# env files
+.env
+.env*.local
+.env.production
+
+# uploads + DB-Daten (lokale Bind-Mounts aus docker-compose.yml)
+/uploads
+/pgdata
+
+# lokale Compose-Overrides (nur Dev: baut statt zu pullen)
+/docker-compose.override.yml
+
+# typescript
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+*.log

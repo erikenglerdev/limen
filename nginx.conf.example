@@ -1,0 +1,84 @@
+# Beispiel-nginx-Konfiguration für Limen (OIDC-Identity-Provider).
+# vhost: limen.sturahsa.de
+# nginx terminiert TLS; der Container liefert nur HTTP auf 127.0.0.1:3000.
+# Wichtig: Host + X-Forwarded-* + echte Client-IP durchreichen, damit issuer/
+# Redirects stimmen, der Origin↔Host-CSRF-Check der Server-Actions greift und
+# die IP-Drossel/Audit die echte Client-IP sehen.
+#
+# Backchannel-Hinweis: Die Gremio-App ruft token/jwks/userinfo server-seitig
+# über DIESE öffentliche URL auf (OIDC_INTERNAL_ISSUER=https://limen.sturahsa.de),
+# im Container via extra_hosts "limen.sturahsa.de:host-gateway" auf dieses nginx
+# geleitet. Diese Calls erscheinen daher mit der Docker-Gateway-IP als $remote_addr.
+
+# --- Rate-Limit-Zonen (gehören in den http{}-Block, NICHT in server{}) ---
+# Zweite Verteidigungslinie zusätzlich zur App-internen IP-/2FA-Drossel:
+# bremst Brute-Force gegen /login und schützt /token vor CPU-DoS (argon2 bei
+# falschem client_secret). Werte konservativ; bei Bedarf erhöhen.
+#   limit_req_zone $binary_remote_addr zone=sso_login:10m rate=5r/s;
+#   limit_req_zone $binary_remote_addr zone=sso_token:10m rate=10r/s;
+
+# --- Catch-all: unbekannte/fremde Hosts hart abweisen ---------------------
+# WICHTIG: nur EINMAL pro nginx-Host definieren. Liegt die Gremio-Config
+# (gremio/antrag) auf demselben nginx, steht dieser Block bereits dort —
+# dann hier weglassen (sonst „duplicate default_server").
+# server {
+#     listen 80 default_server;
+#     listen [::]:80 default_server;
+#     server_name _;
+#     return 444;                  # Verbindung ohne Antwort schließen
+# }
+# server {
+#     listen 443 ssl default_server;
+#     listen [::]:443 ssl default_server;
+#     server_name _;
+#     ssl_reject_handshake on;     # kein Zertifikat für fremde Hosts (nginx >= 1.19.4)
+# }
+
+server {
+    listen 80;
+    server_name limen.sturahsa.de;
+    # HTTP → HTTPS (feste Domain, NICHT $host)
+    return 301 https://limen.sturahsa.de$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name limen.sturahsa.de;
+    server_tokens off;
+
+    ssl_certificate     /etc/letsencrypt/live/limen.sturahsa.de/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/limen.sturahsa.de/privkey.pem;
+
+    # HSTS (nur über HTTPS sinnvoll). includeSubDomains/preload bewusst weggelassen,
+    # damit nicht versehentlich alle Subdomains von sturahsa.de gebunden werden.
+    add_header Strict-Transport-Security "max-age=63072000" always;
+
+    # Avatar-Uploads bis 6 MB erlauben (vgl. serverActions.bodySizeLimit)
+    client_max_body_size 6m;
+
+    # Proxy-Header auf server-Ebene → werden von allen location-Blöcken geerbt.
+    # $host ist hier sicher: fremde Hosts hat der default_server bereits mit 444
+    # verworfen, sodass nur die echte Domain diesen Block erreicht.
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+
+    # Login (Passwort + 2FA-Schritt liegen beide unter /login): Brute-Force bremsen.
+    location = /login {
+        limit_req zone=sso_login burst=10 nodelay;
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    # Token-Endpoint: schützt vor argon2-CPU-DoS bei falschen client_secrets.
+    location = /token {
+        limit_req zone=sso_token burst=20 nodelay;
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+}
