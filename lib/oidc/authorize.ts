@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Erik Engler
+import { safeReturnTo } from '@/lib/return-to';
 import type { OAuthClient } from '@/db';
 import { getClient, redirectUriAllowed } from './clients';
 import { issueAuthCode } from './codes';
@@ -115,6 +116,41 @@ export async function completeAuthorizationRedirect(
   url.searchParams.set('code', code);
   url.searchParams.set('state', ar.state);
   return url.toString();
+}
+
+/**
+ * Bestimmt das Ziel NACH erfolgreichem Login.
+ *
+ * Sonderfall first-party-`/authorize`: Die Login-Server-Action leitet sonst per
+ * `redirect('/authorize?…')` weiter — das ist eine *weiche* Client-Router-
+ * Navigation. `/authorize` ist aber ein Route-Handler, der für first-party-Clients
+ * mit einem **Cross-Origin**-Redirect zur App antwortet. Eine weiche Navigation
+ * kann einem fremden Origin nicht folgen → der Router lädt nicht existierende
+ * Chunks → `ChunkLoadError` ("Application error").
+ *
+ * Lösung: Bei first-party stellen wir den Auth-Code hier aus und geben die externe
+ * Redirect-URL zurück. Der `redirect()` der Server-Action navigiert dann per
+ * *harter* Navigation (window.location) zur App — zuverlässig, genau wie der
+ * funktionierende Consent-Pfad (`approveConsent`).
+ *
+ * Non-first-party bleibt unverändert: es wird das interne `/authorize?…`
+ * zurückgegeben, das (same-origin) auf den Consent-Screen führt.
+ */
+export async function resolvePostLoginDestination(
+  returnTo: string | undefined | null,
+  userId: string,
+  authTime?: number | null,
+): Promise<string> {
+  const safe = safeReturnTo(returnTo);
+  const marker = '/authorize?';
+  if (!safe.startsWith(marker)) return safe;
+
+  const v = await validateAuthorizeRequest(new URLSearchParams(safe.slice(marker.length)));
+  // Bei Validierungsfehlern den normalen /authorize-Pfad gehen lassen, der die
+  // korrekte Fehlerbehandlung übernimmt. Nur first-party kürzen wir hier ab.
+  if (v.kind !== 'ok' || !v.req.client.isFirstParty) return safe;
+
+  return completeAuthorizationRedirect(v.req, userId, authTime);
 }
 
 export function buildErrorRedirect(

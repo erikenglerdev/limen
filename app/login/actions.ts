@@ -21,7 +21,7 @@ import {
   recordTwoFactorFailure,
 } from '@/lib/auth';
 import { sha256 } from '@/lib/crypto';
-import { safeReturnTo } from '@/lib/return-to';
+import { resolvePostLoginDestination } from '@/lib/oidc/authorize';
 import { getSession, startSession } from '@/lib/session';
 import { decryptTotpSecret, normalizeRecoveryCode } from '@/lib/totp';
 import {
@@ -77,7 +77,10 @@ export async function loginAction(
 
   await recordSuccessfulLogin(result.user.id, result.user.username.toLowerCase(), ip);
   await startSession(result.user.id);
-  redirect(safeReturnTo(parsed.data.returnTo));
+  const authTime = Math.floor(Date.now() / 1000);
+  redirect(
+    await resolvePostLoginDestination(parsed.data.returnTo, result.user.id, authTime),
+  );
 }
 
 export async function verify2faAction(
@@ -154,7 +157,8 @@ export async function verify2faAction(
   session.mfa = true; // Passwort + TOTP
   session.pending2fa = undefined;
   await session.save();
-  redirect(safeReturnTo(returnTo));
+  const authTime = Math.floor(session.loginAt / 1000);
+  redirect(await resolvePostLoginDestination(returnTo, user.id, authTime));
 }
 
 /** Optionen für den passwortlosen Passkey-Login (Schritt 1). */
@@ -209,5 +213,6 @@ export async function verifyPasswordless(
   session.mfa = true; // Passkey ist user-verifiziert → MFA
   session.pending2fa = undefined;
   await session.save();
-  redirect(safeReturnTo(returnTo));
+  const authTime = Math.floor(session.loginAt / 1000);
+  redirect(await resolvePostLoginDestination(returnTo, user.id, authTime));
 }
