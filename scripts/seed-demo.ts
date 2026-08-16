@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Erik Engler
 /**
- * Demo-Seed für Produkt-Screenshots (NICHT in Produktion ausführen).
+ * Demo-Seed für Produkt-Screenshots.
  *
- * Legt einen vollständig gefüllten Zustand an: Konten der fiktiven „Fachschaft
+ * ACHTUNG, DESTRUKTIV: löscht ALLE Konten, Clients (außer `dev-client`), Tokens,
+ * Passkeys und das Audit-Protokoll, bevor der Demo-Zustand angelegt wird.
+ *
+ * Legt danach einen vollständig gefüllten Zustand an: Konten der fiktiven „Fachschaft
  * Informatik" (Hochschule Westfeld), registrierte Client-Apps, aktive Verbindungen,
  * Anmeldeverlauf, Audit-Protokoll, 2FA inkl. Recovery-Codes und Passkeys.
  *
  * Alle Daten sind frei erfunden: Domains unter `.example` (RFC 2606), IP-Adressen aus
  * den Dokumentations-Netzen 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 (RFC 5737).
  *
- * Aufruf:  set -a && . ./.env && set +a && npx tsx scripts/seed-demo.ts
+ * Damit ein versehentlicher Lauf gegen eine echte Instanz nicht Konten löscht und
+ * auch keine Konten mit bekanntem Passwort ins Netz stellt, gelten drei Sperren
+ * (siehe `assertSafeTarget`): explizites NODE_ENV=development, eine DATABASE_URL auf
+ * localhost, und ein Demo-Passwort, das NICHT im Quelltext steht.
+ *
+ * Aufruf:
+ *   set -a && . ./.env && set +a && NODE_ENV=development npx tsx scripts/seed-demo.ts
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -29,13 +38,91 @@ import {
   webauthnCredentials,
 } from '../db';
 import { encryptSecret, sha256 } from '../lib/crypto';
-import { hashPassword } from '../lib/password';
+import { hashPassword, MIN_PASSWORD_LENGTH } from '../lib/password';
 import { generateRecoveryCodes, generateTotpSecret, normalizeRecoveryCode, totpUri } from '../lib/totp';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = Date.now();
+
+// ---------------------------------------------------------------------------
+// Schutz gegen einen versehentlichen Lauf gegen eine echte Instanz.
+// ---------------------------------------------------------------------------
+
+/**
+ * Bricht ab, wenn das Ziel keine lokale Entwicklungs-Datenbank ist.
+ *
+ * Zwei unabhängige Sperren, weil dieses Skript Konten LÖSCHT:
+ *  1. NODE_ENV muss explizit 'development' sein. Ein ungesetztes NODE_ENV zählt –
+ *     wie in lib/env.ts – als Produktion, ist also KEIN Freifahrtschein.
+ *  2. DATABASE_URL muss auf einen Loopback-Host zeigen. Das ist die eigentliche
+ *     Sperre: Sie greift auch dann, wenn jemand NODE_ENV=development gesetzt hat,
+ *     die Verbindung aber auf einen echten Datenbank-Server zeigt.
+ */
+function assertSafeTarget(): void {
+  const problems: string[] = [];
+
+  if (process.env.NODE_ENV !== 'development') {
+    problems.push(
+      `NODE_ENV ist ${process.env.NODE_ENV ? `'${process.env.NODE_ENV}'` : 'nicht gesetzt'}, ` +
+        `erwartet wird 'development'.`,
+    );
+  }
+
+  const raw = process.env.DATABASE_URL;
+  if (!raw) {
+    problems.push('DATABASE_URL ist nicht gesetzt.');
+  } else {
+    let host = '';
+    try {
+      host = new URL(raw).hostname;
+    } catch {
+      problems.push('DATABASE_URL ist keine gültige URL.');
+    }
+    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'];
+    if (host && !loopback.includes(host)) {
+      problems.push(`DATABASE_URL zeigt auf '${host}', erlaubt sind nur ${loopback.join(', ')}.`);
+    }
+  }
+
+  if (problems.length === 0) return;
+
+  console.error(
+    [
+      '',
+      '  ✗ Abbruch: Dieses Skript LÖSCHT alle Konten und legt Demo-Daten an.',
+      '    Es läuft nur gegen eine lokale Entwicklungs-Datenbank.',
+      '',
+      ...problems.map((p) => `    · ${p}`),
+      '',
+      '    Wenn das wirklich eine Wegwerf-Datenbank ist:',
+      '      NODE_ENV=development npx tsx scripts/seed-demo.ts',
+      '',
+    ].join('\n'),
+  );
+  process.exit(1);
+}
+
+/**
+ * Demo-Passwort für alle Konten. Bewusst NICHT im Quelltext hinterlegt: sonst stünde
+ * in einem öffentlichen Repo ein gültiges Login für jedes geseedete Konto. Aus `.env`
+ * (gitignored) über DEMO_PASSWORD, sonst wird ein Zufallspasswort erzeugt und am Ende
+ * einmalig ausgegeben.
+ */
+function demoPassword(): { password: string; generated: boolean } {
+  const fromEnv = process.env.DEMO_PASSWORD?.trim();
+  if (fromEnv) {
+    if (fromEnv.length < MIN_PASSWORD_LENGTH) {
+      console.error(
+        `\n  ✗ DEMO_PASSWORD ist zu kurz (mind. ${MIN_PASSWORD_LENGTH} Zeichen).\n`,
+      );
+      process.exit(1);
+    }
+    return { password: fromEnv, generated: false };
+  }
+  return { password: `demo-${randomBytes(9).toString('base64url')}`, generated: true };
+}
 
 /** Zeitpunkt vor n Tagen (optional mit Uhrzeit-Versatz in Stunden). */
 function daysAgo(d: number, hoursOffset = 0): Date {
@@ -218,6 +305,9 @@ function pick<T>(list: T[], i: number): T {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  assertSafeTarget();
+  const { password: DEMO_PASSWORD, generated: passwordGenerated } = demoPassword();
+
   const uploadDir = process.env.UPLOAD_DIR || './uploads';
   await fs.mkdir(uploadDir, { recursive: true });
 
@@ -231,7 +321,6 @@ async function main() {
   await db.delete(oauthClients).where(sql`${oauthClients.clientId} <> 'dev-client'`);
 
   // Alle Demo-Konten teilen dasselbe Passwort – ein einziger argon2-Hash spart Zeit.
-  const DEMO_PASSWORD = 'Fachschaft-Demo-2026';
   console.log('· Passwort-Hash erzeugen (argon2id)…');
   const sharedHash = await hashPassword(DEMO_PASSWORD);
 
@@ -468,6 +557,10 @@ async function main() {
   console.log(`  Konten:      ${userCount}`);
   console.log(`  Anwendungen: ${clientCount}`);
   console.log(`\n  Login für alle Konten:  Passwort  ${DEMO_PASSWORD}`);
+  if (passwordGenerated) {
+    console.log(`  ↑ zufällig erzeugt und nirgends gespeichert. Für ein stabiles`);
+    console.log(`    Passwort über Seed-Läufe hinweg: DEMO_PASSWORD in .env setzen.`);
+  }
   console.log(`  Admin-Konto:            m.haltenbach  (Mira Haltenbach)`);
   if (adminTotpSecret) {
     console.log(`\n  TOTP für m.haltenbach (für den Admin-Bereich nötig):`);
