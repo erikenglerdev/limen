@@ -73,7 +73,7 @@ function hostOf(raw: string): string | null {
  *     unter localhost. Die öffentliche Issuer-URL verrät diesen Fall.
  *
  * Keine dieser Sperren kennt den Inhalt der Datenbank – das erledigt
- * `assertNoForeignAccounts()` unmittelbar vor dem ersten Löschbefehl.
+ * `assertNoForeignData()` unmittelbar vor dem ersten Löschbefehl.
  */
 function assertSafeTarget(): void {
   const problems: string[] = [];
@@ -128,43 +128,76 @@ function assertSafeTarget(): void {
   process.exit(1);
 }
 
+/** Kürzt eine Fundliste für die Ausgabe auf höchstens fünf Einträge. */
+function summarize(items: string[]): string {
+  const shown = items.slice(0, 5).join(', ');
+  return items.length > 5 ? `${shown} … und ${items.length - 5} weitere` : shown;
+}
+
 /**
- * Letzte und wichtigste Sperre, direkt vor dem ersten Löschbefehl: Bricht ab, sobald
- * die Datenbank auch nur ein Konto enthält, das nicht zu diesem Demo-Datensatz gehört.
+ * Letzte und wichtigste Sperre, direkt vor dem ersten Löschbefehl: Bricht ab, sobald die
+ * Datenbank auch nur einen Datensatz enthält, der nicht zu diesem Demo-Stand gehört.
  *
  * Der Unterschied zu `assertSafeTarget()` ist entscheidend. Jene Sperren prüfen, wo die
  * Datenbank steht – das lässt sich unabsichtlich aushebeln (Skript auf dem Server,
  * SSH-Tunnel, kopierte .env). Diese hier prüft, WAS darin steht, und eine echte Instanz
- * verrät sich immer durch ihre echten Konten.
+ * verrät sich immer durch ihre echten Daten.
+ *
+ * Geprüft werden beide Tabellen, die dieses Skript löscht und die nicht wiederherstellbar
+ * sind: `users` und `oauth_clients`. Bei Clients wiegt der Verlust sogar schwerer als bei
+ * Konten – mit der Registrierung ist auch der Hash des `client_secret` weg, und da das
+ * Secret nur einmal bei der Anlage angezeigt wird, muss jede angebundene App neu
+ * eingerichtet werden. Die übrigen gelöschten Tabellen (Tokens, Login-Versuche,
+ * Audit-Log) hängen an diesen beiden bzw. sind kurzlebig.
  *
  * Erlaubt bleiben: eine leere Datenbank, ein bereits geseedeter Demo-Stand (erneutes
- * Seeden) und das per ADMIN_USER gebootstrappte Erst-Admin-Konto einer frischen Instanz.
+ * Seeden), das per ADMIN_USER gebootstrappte Erst-Admin-Konto und der von
+ * lib/bootstrap.ts außerhalb der Produktion angelegte `dev-client`.
  */
-async function assertNoForeignAccounts(): Promise<void> {
-  const known = new Set(PEOPLE.map((p) => p.username.toLowerCase()));
+async function assertNoForeignData(): Promise<void> {
+  const knownUsers = new Set(PEOPLE.map((p) => p.username.toLowerCase()));
   const bootstrapAdmin = process.env.ADMIN_USER?.trim().toLowerCase();
-  if (bootstrapAdmin) known.add(bootstrapAdmin);
+  if (bootstrapAdmin) knownUsers.add(bootstrapAdmin);
 
-  const existing = await db.select({ username: users.username }).from(users);
-  const foreign = existing.filter((u) => !known.has(u.username.toLowerCase()));
-  if (foreign.length === 0) return;
+  const knownClients = new Set([...CLIENTS.map((c) => c.clientId), 'dev-client']);
 
-  const shown = foreign.slice(0, 5).map((u) => `@${u.username}`).join(', ');
-  const more = foreign.length > 5 ? ` … und ${foreign.length - 5} weitere` : '';
+  const [existingUsers, existingClients] = await Promise.all([
+    db.select({ username: users.username }).from(users),
+    db.select({ clientId: oauthClients.clientId, name: oauthClients.name }).from(oauthClients),
+  ]);
 
-  console.error(
-    [
+  const foreignUsers = existingUsers
+    .filter((u) => !knownUsers.has(u.username.toLowerCase()))
+    .map((u) => `@${u.username}`);
+  const foreignClients = existingClients
+    .filter((c) => !knownClients.has(c.clientId))
+    .map((c) => `${c.name} (${c.clientId})`);
+
+  if (foreignUsers.length === 0 && foreignClients.length === 0) return;
+
+  const lines = ['', '  ✗ Abbruch: Diese Datenbank enthält fremde Daten.', ''];
+  if (foreignUsers.length > 0) {
+    lines.push(
+      `    ${foreignUsers.length} von ${existingUsers.length} Konten gehören nicht zum Demo-Datensatz:`,
+      `      ${summarize(foreignUsers)}`,
       '',
-      '  ✗ Abbruch: Diese Datenbank enthält fremde Konten.',
+    );
+  }
+  if (foreignClients.length > 0) {
+    lines.push(
+      `    ${foreignClients.length} von ${existingClients.length} Anwendungen gehören nicht zum Demo-Datensatz:`,
+      `      ${summarize(foreignClients)}`,
       '',
-      `    ${foreign.length} von ${existing.length} Konten gehören nicht zum Demo-Datensatz:`,
-      `      ${shown}${more}`,
-      '',
-      '    Das Skript würde sie unwiederbringlich löschen. Falls das wirklich eine',
-      '    Wegwerf-Datenbank ist: Konten vorher manuell entfernen.',
-      '',
-    ].join('\n'),
+    );
+  }
+  lines.push(
+    '    Das Skript würde sie unwiederbringlich löschen – bei Anwendungen auch deren',
+    '    client_secret, was jede angebundene App aussperrt.',
+    '    Falls das wirklich eine Wegwerf-Datenbank ist: Daten vorher manuell entfernen.',
+    '',
   );
+
+  console.error(lines.join('\n'));
   process.exit(1);
 }
 
@@ -375,7 +408,7 @@ async function main() {
   const uploadDir = process.env.UPLOAD_DIR || './uploads';
   await fs.mkdir(uploadDir, { recursive: true });
 
-  await assertNoForeignAccounts();
+  await assertNoForeignData();
 
   console.log('· Bestehende Demo-Daten entfernen…');
   await db.delete(auditLog);
