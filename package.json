@@ -2,7 +2,7 @@
   "name": "limen",
   "version": "1.0.3",
   "private": true,
-  "license": "AGPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "next dev",

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 import path from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';

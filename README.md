@@ -123,8 +123,10 @@ Im Docker-Betrieb z.B. via `docker compose run --rm -e … app npm run rotate-en
 
 ## Lizenz
 
-**GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** — siehe [`LICENSE`](./LICENSE).
-© 2026 Erik Engler.
+**GNU Affero General Public License, Version 3 (AGPL-3.0-only)** — siehe [`LICENSE`](./LICENSE).
+© 2026 Leviora Studio.
+
+Ausdrücklich **nur Version 3**, ohne die Option „oder eine spätere Version".
 
 Kurz: nutzen, hosten und ändern erlaubt — **aber wer eine geänderte Version weitergibt oder als
 Netzdienst betreibt, muss den Quellcode (inkl. Änderungen) unter AGPL offenlegen.** Es darf keine

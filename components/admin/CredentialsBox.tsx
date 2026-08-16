@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 /** Zeigt client_id und (einmalig) client_secret nach Registrierung/Rotation. */
 export function CredentialsBox({
   clientId,

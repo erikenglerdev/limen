@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { db, type OAuthClient, oauthClients, refreshTokens, users, type User } from '@/db';
 import { randomToken, sha256 } from '../crypto';

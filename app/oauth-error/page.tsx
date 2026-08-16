@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 export const dynamic = 'force-dynamic';
 
 // Nur bekannte OAuth/OIDC-Fehlercodes mit serverseitig festen Texten anzeigen.

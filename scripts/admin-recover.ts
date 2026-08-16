@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 /**
  * Break-Glass-Admin-Recovery (NUR mit Server-/DB-Zugriff ausführbar).
  * Notfall-Pfad, falls niemand mehr in die Verwaltung kommt (z.B. letzter Admin hat

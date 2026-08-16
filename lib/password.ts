@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 // @node-rs/argon2 ist CommonJS – Namespace-Import vermeidet Named-Export-Probleme
 // in der webpack-Analyse.
 import * as argon2 from '@node-rs/argon2';

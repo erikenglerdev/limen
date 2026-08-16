@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 import { and, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { db, loginAttempts, users, type User } from '@/db';

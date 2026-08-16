@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 import { getIronSession } from 'iron-session';
 import { type NextRequest, NextResponse } from 'next/server';
 import { type SessionData, sessionOptions } from '@/lib/session-config';

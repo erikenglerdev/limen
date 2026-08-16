@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 /**
  * Rotiert den AES-Umschlüssel (ENCRYPTION_KEY): entschlüsselt alle at-rest Secrets
  * (Signaturschlüssel-PEMs + TOTP-Secrets) mit dem ALTEN Schlüssel und verschlüsselt

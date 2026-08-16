@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Erik Engler
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Leviora Studio
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db, loginAttempts, totpRecoveryCodes } from '@/db';
 import { AppHeader } from '@/components/AppHeader';
