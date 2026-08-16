@@ -80,7 +80,14 @@ export default async function AdminUsersPage({
             <li key={u.id} className="flex flex-wrap items-center gap-3 p-4">
               <Avatar
                 name={u.name}
-                src={u.avatarPath ? `/avatar/${u.id}?v=${u.updatedAt.getTime()}` : null}
+                // /avatar/[userId] liefert für deaktivierte Konten bewusst 404
+                // (Kill-Switch). Dann gar nicht erst anfragen, sonst bliebe ein
+                // kaputtes <img> statt des Initialen-Fallbacks stehen.
+                src={
+                  u.isActive && u.avatarPath
+                    ? `/avatar/${u.id}?v=${u.updatedAt.getTime()}`
+                    : null
+                }
                 size={40}
               />
               <div className="min-w-0 flex-1">

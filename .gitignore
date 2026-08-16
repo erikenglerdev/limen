@@ -37,3 +37,6 @@ next-env.d.ts
 # logs
 npm-debug.log*
 *.log
+
+# lokales Demo-Hilfsskript (gibt TOTP-Secrets im Klartext aus)
+/scripts/demo-totp.ts
