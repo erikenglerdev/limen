@@ -50,15 +50,30 @@ const NOW = Date.now();
 // Schutz gegen einen versehentlichen Lauf gegen eine echte Instanz.
 // ---------------------------------------------------------------------------
 
+const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
+
+function hostOf(raw: string): string | null {
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Bricht ab, wenn das Ziel keine lokale Entwicklungs-Datenbank ist.
+ * Bricht ab, wenn die Umgebung nicht nach lokaler Entwicklung aussieht.
  *
- * Zwei unabhängige Sperren, weil dieses Skript Konten LÖSCHT:
+ * Drei Sperren, weil dieses Skript Konten LÖSCHT:
  *  1. NODE_ENV muss explizit 'development' sein. Ein ungesetztes NODE_ENV zählt –
  *     wie in lib/env.ts – als Produktion, ist also KEIN Freifahrtschein.
- *  2. DATABASE_URL muss auf einen Loopback-Host zeigen. Das ist die eigentliche
- *     Sperre: Sie greift auch dann, wenn jemand NODE_ENV=development gesetzt hat,
- *     die Verbindung aber auf einen echten Datenbank-Server zeigt.
+ *  2. DATABASE_URL muss auf einen Loopback-Host zeigen.
+ *  3. APP_BASE_URL muss auf einen Loopback-Host zeigen. Nötig, weil Sperre 2 allein
+ *     den wichtigsten Restfall NICHT abdeckt: Wer das Skript auf dem Produktions-
+ *     server selbst (oder durch einen SSH-Tunnel) ausführt, hat die echte Datenbank
+ *     unter localhost. Die öffentliche Issuer-URL verrät diesen Fall.
+ *
+ * Keine dieser Sperren kennt den Inhalt der Datenbank – das erledigt
+ * `assertNoForeignAccounts()` unmittelbar vor dem ersten Löschbefehl.
  */
 function assertSafeTarget(): void {
   const problems: string[] = [];
@@ -70,19 +85,28 @@ function assertSafeTarget(): void {
     );
   }
 
-  const raw = process.env.DATABASE_URL;
-  if (!raw) {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
     problems.push('DATABASE_URL ist nicht gesetzt.');
   } else {
-    let host = '';
-    try {
-      host = new URL(raw).hostname;
-    } catch {
-      problems.push('DATABASE_URL ist keine gültige URL.');
+    const host = hostOf(dbUrl);
+    if (host === null) problems.push('DATABASE_URL ist keine gültige URL.');
+    else if (!LOOPBACK.includes(host)) {
+      problems.push(`DATABASE_URL zeigt auf '${host}', erlaubt sind nur ${LOOPBACK.join(', ')}.`);
     }
-    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'];
-    if (host && !loopback.includes(host)) {
-      problems.push(`DATABASE_URL zeigt auf '${host}', erlaubt sind nur ${loopback.join(', ')}.`);
+  }
+
+  const appUrl = process.env.APP_BASE_URL;
+  if (!appUrl) {
+    problems.push('APP_BASE_URL ist nicht gesetzt.');
+  } else {
+    const host = hostOf(appUrl);
+    if (host === null) problems.push('APP_BASE_URL ist keine gültige URL.');
+    else if (!LOOPBACK.includes(host)) {
+      problems.push(
+        `APP_BASE_URL ist '${appUrl}' – das sieht nach einer echten Instanz aus, ` +
+          `nicht nach lokaler Entwicklung.`,
+      );
     }
   }
 
@@ -98,6 +122,46 @@ function assertSafeTarget(): void {
       '',
       '    Wenn das wirklich eine Wegwerf-Datenbank ist:',
       '      NODE_ENV=development npx tsx scripts/seed-demo.ts',
+      '',
+    ].join('\n'),
+  );
+  process.exit(1);
+}
+
+/**
+ * Letzte und wichtigste Sperre, direkt vor dem ersten Löschbefehl: Bricht ab, sobald
+ * die Datenbank auch nur ein Konto enthält, das nicht zu diesem Demo-Datensatz gehört.
+ *
+ * Der Unterschied zu `assertSafeTarget()` ist entscheidend. Jene Sperren prüfen, wo die
+ * Datenbank steht – das lässt sich unabsichtlich aushebeln (Skript auf dem Server,
+ * SSH-Tunnel, kopierte .env). Diese hier prüft, WAS darin steht, und eine echte Instanz
+ * verrät sich immer durch ihre echten Konten.
+ *
+ * Erlaubt bleiben: eine leere Datenbank, ein bereits geseedeter Demo-Stand (erneutes
+ * Seeden) und das per ADMIN_USER gebootstrappte Erst-Admin-Konto einer frischen Instanz.
+ */
+async function assertNoForeignAccounts(): Promise<void> {
+  const known = new Set(PEOPLE.map((p) => p.username.toLowerCase()));
+  const bootstrapAdmin = process.env.ADMIN_USER?.trim().toLowerCase();
+  if (bootstrapAdmin) known.add(bootstrapAdmin);
+
+  const existing = await db.select({ username: users.username }).from(users);
+  const foreign = existing.filter((u) => !known.has(u.username.toLowerCase()));
+  if (foreign.length === 0) return;
+
+  const shown = foreign.slice(0, 5).map((u) => `@${u.username}`).join(', ');
+  const more = foreign.length > 5 ? ` … und ${foreign.length - 5} weitere` : '';
+
+  console.error(
+    [
+      '',
+      '  ✗ Abbruch: Diese Datenbank enthält fremde Konten.',
+      '',
+      `    ${foreign.length} von ${existing.length} Konten gehören nicht zum Demo-Datensatz:`,
+      `      ${shown}${more}`,
+      '',
+      '    Das Skript würde sie unwiederbringlich löschen. Falls das wirklich eine',
+      '    Wegwerf-Datenbank ist: Konten vorher manuell entfernen.',
       '',
     ].join('\n'),
   );
@@ -310,6 +374,8 @@ async function main() {
 
   const uploadDir = process.env.UPLOAD_DIR || './uploads';
   await fs.mkdir(uploadDir, { recursive: true });
+
+  await assertNoForeignAccounts();
 
   console.log('· Bestehende Demo-Daten entfernen…');
   await db.delete(auditLog);
